@@ -23,10 +23,11 @@ import (
 	"fmt"
 	"path/filepath"
 
-	corev1 "k8s.io/api/core/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 	//
@@ -54,37 +55,40 @@ func main() {
 		panic(err.Error())
 	}
 
-	config.APIPath = "api"
-	config.GroupVersion = &corev1.SchemeGroupVersion
+	dynamicclient, err := dynamic.NewForConfig(config)
 
-	// 配置数据的编解码器
-	config.NegotiatedSerializer = scheme.Codecs
-
-	// create the restclient
-	restClient, err := rest.RESTClientFor(config)
 	if err != nil {
 		panic(err.Error())
 	}
 
-	result := &corev1.PodList{}
+	gvr := schema.GroupVersionResource{
+		Group:    "apps",
+		Version:  "v1",
+		Resource: "deployments",
+	}
 
-	err = restClient.Get().
-		// Namespace("olm").
-		Resource("pods").
-		VersionedParams(&metav1.ListOptions{Limit: 100}, scheme.ParameterCodec).
-		Do(context.TODO()).
-		Into(result)
-
+	unstructObj, err := dynamicclient.Resource(gvr).Namespace("olm").List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		panic(err)
 	}
 
-	for _, d := range result.Items {
+	// 通过 runtime.DefaultUnstructuredConverter 函数将 unstructured.UnstructuredList
+	// 转为 DeploymentList 类型
+	deploymentList := &appsv1.DeploymentList{}
+	err = runtime.DefaultUnstructuredConverter.FromUnstructured(
+		unstructObj.UnstructuredContent(),
+		deploymentList,
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	for _, v := range deploymentList.Items {
 		fmt.Printf(
-			"NAMESPACE:%v \t NAME: %v \t STATUS: %v\n",
-			d.Namespace,
-			d.Name,
-			d.Status.Phase,
+			"KIND: %v \t NAMESPACE: %v \t NAME:%v \n",
+			v.Kind,
+			v.Namespace,
+			v.Name,
 		)
 	}
 }
