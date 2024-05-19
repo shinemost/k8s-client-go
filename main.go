@@ -18,16 +18,12 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
 	"path/filepath"
 
-	appsv1 "k8s.io/api/apps/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 	//
@@ -55,40 +51,27 @@ func main() {
 		panic(err.Error())
 	}
 
-	dynamicclient, err := dynamic.NewForConfig(config)
-
-	if err != nil {
-		panic(err.Error())
-	}
-
-	gvr := schema.GroupVersionResource{
-		Group:    "apps",
-		Version:  "v1",
-		Resource: "deployments",
-	}
-
-	unstructObj, err := dynamicclient.Resource(gvr).Namespace("olm").List(context.TODO(), metav1.ListOptions{})
+	// 通过 config 实例化 DiscoveryClient 对象
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
 		panic(err)
 	}
 
-	// 通过 runtime.DefaultUnstructuredConverter 函数将 unstructured.UnstructuredList
-	// 转为 DeploymentList 类型
-	deploymentList := &appsv1.DeploymentList{}
-	err = runtime.DefaultUnstructuredConverter.FromUnstructured(
-		unstructObj.UnstructuredContent(),
-		deploymentList,
-	)
+	// 返回 Kubernetes APIServer 所支持的资源组、资源版本和资源信息
+	_, APIResourceList, err := discoveryClient.ServerGroupsAndResources()
 	if err != nil {
 		panic(err)
 	}
 
-	for _, v := range deploymentList.Items {
-		fmt.Printf(
-			"KIND: %v \t NAMESPACE: %v \t NAME:%v \n",
-			v.Kind,
-			v.Namespace,
-			v.Name,
-		)
+	// 输出所有资源信息
+	for _, list := range APIResourceList {
+		gv, err := schema.ParseGroupVersion(list.GroupVersion)
+		if err != nil {
+			panic(err)
+		}
+		for _, resource := range list.APIResources {
+			fmt.Printf("NAME: %v, GROUP: %v, VERSION: %v \n", resource.
+				Name, gv.Group, gv.Version)
+		}
 	}
 }
